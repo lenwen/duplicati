@@ -110,7 +110,7 @@ CREATE TABLE "BlocklistHash" (
 	"Hash" TEXT NOT NULL
 );
 
-CREATE UNIQUE INDEX "BlocklistHashUnique" ON "BlocklistHash" ("BlocksetID", "Index", "Hash");
+CREATE UNIQUE INDEX "BlocklistHashUnique" ON "BlocklistHash" ("BlocksetID", "Index");
 
 /*
 The blockset is a list of blocks
