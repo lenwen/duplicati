@@ -110,6 +110,8 @@ CREATE TABLE "BlocklistHash" (
 	"Hash" TEXT NOT NULL
 );
 
+CREATE UNIQUE INDEX "BlocklistHashUnique" ON "BlocklistHash" ("BlocksetID", "Index", "Hash");
+
 /*
 The blockset is a list of blocks
 Note that Length is actually redundant,
@@ -241,4 +243,4 @@ CREATE TABLE "Configuration" (
 	"Value" TEXT NOT NULL
 );
 
-INSERT INTO "Version" ("Version") VALUES (6);
+INSERT INTO "Version" ("Version") VALUES (7);
