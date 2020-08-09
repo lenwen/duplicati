@@ -8,6 +8,7 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions
+from selenium.webdriver.firefox.options import Options
 
 if "TRAVIS_BUILD_NUMBER" in os.environ:
     if "SAUCE_USERNAME" not in os.environ:
@@ -31,7 +32,9 @@ else:
     print "Using LOCAL webdriver"
     profile = webdriver.FirefoxProfile()
     profile.set_preference("intl.accept_languages", "en")
-    driver = webdriver.Firefox(profile)
+    options = Options()
+    options.set_headless(headless=True)
+    driver = webdriver.Firefox(profile, firefox_options=options)
     driver.maximize_window()
 
 
@@ -97,6 +100,9 @@ write_random_file(1024 * 1024, SOURCE_FOLDER + os.sep + "1MB.test")
 write_random_file(100 * 1024, SOURCE_FOLDER + os.sep + "subfolder" + os.sep + "100KB.test")
 sha1_source = sha1_folder(SOURCE_FOLDER)
 
+# Dismiss the password request
+driver.find_element_by_link_text("No, my machine has only a single account").click()
+
 # Add new backup
 driver.find_element_by_link_text("Add backup").click()
 
@@ -136,10 +142,10 @@ driver.find_element_by_link_text(BACKUP_NAME).click()
 wait_for_text(60, "//div[@class='task ng-scope']/dl[2]/dd[1]", "(took ")
 
 # Restore
-if len([n for n in driver.find_elements_by_xpath("//span[contains(text(),'Restore files ...')]") if n.is_displayed()]) == 0:
+if len([n for n in driver.find_elements_by_xpath(u"//span[contains(text(),'Restore files \u2026')]") if n.is_displayed()]) == 0:
     driver.find_element_by_link_text(BACKUP_NAME).click()
 
-[n for n in driver.find_elements_by_xpath("//span[contains(text(),'Restore files ...')]") if n.is_displayed()][0].click()
+[n for n in driver.find_elements_by_xpath(u"//span[contains(text(),'Restore files \u2026')]") if n.is_displayed()][0].click()
 driver.find_element_by_xpath("//span[contains(text(),'" + SOURCE_FOLDER + "')]")  # wait for filelist
 time.sleep(1)
 driver.find_element_by_xpath("//restore-file-picker/ul/li/div/a[2]").click()  # select root folder checkbox
@@ -156,8 +162,10 @@ wait_for_text(60, "//form[@id='restore']/div[3]/h3/div[1]", "Your files and fold
 sha1_restore = sha1_folder(RESTORE_FOLDER)
 
 # cleanup: delete source and restore folder and rename destination folder for direct restore
-shutil.rmtree(SOURCE_FOLDER)
-shutil.rmtree(RESTORE_FOLDER)
+if os.path.exists(SOURCE_FOLDER):
+    shutil.rmtree(SOURCE_FOLDER)
+if os.path.exists(RESTORE_FOLDER):
+    shutil.rmtree(RESTORE_FOLDER)
 os.rename(DESTINATION_FOLDER, DESTINATION_FOLDER_DIRECT_RESTORE)
 
 # direct restore

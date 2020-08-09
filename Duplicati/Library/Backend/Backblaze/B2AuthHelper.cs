@@ -27,7 +27,7 @@ namespace Duplicati.Library.Backend.Backblaze
         private readonly string m_credentials;
         private AuthResponse m_config;
         private DateTime m_configExpires;
-        private const string AUTH_URL = "https://api.backblazeb2.com/b2api/v1/b2_authorize_account";
+        internal const string AUTH_URL = "https://api.backblazeb2.com/b2api/v1/b2_authorize_account";
 
         public B2AuthHelper(string userid, string password)
             : base()
@@ -49,9 +49,29 @@ namespace Duplicati.Library.Backend.Backblaze
 
         private string DropTrailingSlashes(string url)
         {
-            while(url.EndsWith("/"))
+            while(url.EndsWith("/", StringComparison.Ordinal))
                 url = url.Substring(0, url.Length - 1);
             return url;
+        }
+
+        public string APIDnsName
+        {
+            get
+            {
+                if (m_config == null || string.IsNullOrWhiteSpace(m_config.APIUrl))
+                    return null;
+                return new System.Uri(m_config.APIUrl).Host;
+            }
+        }
+
+        public string DownloadDnsName
+        {
+            get
+            {
+                if (m_config == null || string.IsNullOrWhiteSpace(m_config.DownloadUrl))
+                    return null;
+                return new System.Uri(m_config.DownloadUrl).Host;
+            }
         }
 
         private AuthResponse Config
@@ -81,16 +101,14 @@ namespace Duplicati.Library.Backend.Backblaze
                         }
                         catch (Exception ex)
                         {
-                            
-                            var msg = ex.Message;
                             var clienterror = false;
 
                             try
                             {
                                 // Only retry once on client errors
-                                if (ex is WebException && (ex as WebException).Response is HttpWebResponse)
+                                if (ex is WebException exception && exception.Response is HttpWebResponse response)
                                 {
-                                    var sc = (int)((ex as WebException).Response as HttpWebResponse).StatusCode;
+                                    var sc = (int)response.StatusCode;
                                     clienterror = (sc >= 400 && sc <= 499);
                                 }
                             }
@@ -119,10 +137,9 @@ namespace Duplicati.Library.Backend.Backblaze
             Exception newex = null;
             try
             {
-                if (ex is WebException && (ex as WebException).Response is HttpWebResponse)
+                if (ex is WebException exception && exception.Response is HttpWebResponse hs)
                 {
                     string rawdata = null;
-                    var hs = (ex as WebException).Response as HttpWebResponse;
                     using(var rs = Library.Utility.AsyncHttpRequest.TrySetTimeout(hs.GetResponseStream()))
                     using(var sr = new System.IO.StreamReader(rs))
                         rawdata = sr.ReadToEnd();
@@ -148,10 +165,10 @@ namespace Duplicati.Library.Backend.Backblaze
 
         public static HttpStatusCode GetExceptionStatusCode(Exception ex)
         {
-            if (ex is WebException && (ex as WebException).Response is HttpWebResponse)
-                return ((ex as WebException).Response as HttpWebResponse).StatusCode;
+            if (ex is WebException exception && exception.Response is HttpWebResponse response)
+                return response.StatusCode;
             else
-                return (HttpStatusCode)0;
+                return default(HttpStatusCode);
         }
             
 

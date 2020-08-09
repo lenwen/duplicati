@@ -5,13 +5,13 @@ if [ ! -f "$1" ]; then
 	exit
 fi
 
-FILENAME=`basename $1`
-DIRNAME=`echo "${FILENAME}" | cut -d "_" -f 1`
-VERSION=`echo "${DIRNAME}" | cut -d "-" -f 2`
-BUILDDATE=`date +%Y%m%d`
-BUILDTAG_RAW=`echo "${FILENAME}" | cut -d "." -f 1-4 | cut -d "-" -f 2-4`
+FILENAME=$(basename $1)
+DIRNAME=$(echo "${FILENAME}" | cut -d "_" -f 1)
+VERSION=$(echo "${DIRNAME}" | cut -d "-" -f 2)
+BUILDDATE=$(date +%Y%m%d)
+BUILDTAG_RAW=$(echo "${FILENAME}" | cut -d "." -f 1-4 | cut -d "-" -f 2-4)
 BUILDTAG="${BUILDTAG_RAW//-}"
-CWD=`pwd`
+CWD=$(pwd)
 
 echo "BUILDTAG: ${BUILDTAG}"
 echo "Version: ${VERSION}"
@@ -62,6 +62,8 @@ mv "${DIRNAME}.tar.bz2" "${RPMBUILD}/SOURCES/"
 cp duplicati.xpm "${RPMBUILD}/SOURCES/"
 cp make-binary-package.sh "${RPMBUILD}/SOURCES/duplicati-make-binary-package.sh"
 cp duplicati-install-recursive.sh "${RPMBUILD}/SOURCES/duplicati-install-recursive.sh"
+cp duplicati.service "${RPMBUILD}/SOURCES/duplicati.service"
+cp duplicati.default "${RPMBUILD}/SOURCES/duplicati.default"
 
 echo "%global _builddate ${BUILDDATE}" > "${RPMBUILD}/SOURCES/duplicati-buildinfo.spec"
 echo "%global _buildversion ${VERSION}" >> "${RPMBUILD}/SOURCES/duplicati-buildinfo.spec"

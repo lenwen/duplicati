@@ -15,9 +15,11 @@
 //  License along with this library; if not, write to the Free Software
 //  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using HttpServer.HttpModules;
-using System.Collections.Generic;
+
 using Duplicati.Server.WebServer.RESTMethods;
 
 namespace Duplicati.Server.WebServer
@@ -27,7 +29,7 @@ namespace Duplicati.Server.WebServer
         public const string API_URI_PATH = "/api/v1";
         public static readonly int API_URI_SEGMENTS = API_URI_PATH.Split(new char[] {'/'}).Length;
 
-        private static readonly Dictionary<string, IRESTMethod> _modules = new Dictionary<string, IRESTMethod>(StringComparer.InvariantCultureIgnoreCase);
+        private static readonly Dictionary<string, IRESTMethod> _modules = new Dictionary<string, IRESTMethod>(StringComparer.OrdinalIgnoreCase);
 
         public static IDictionary<string, IRESTMethod> Modules { get { return _modules; } }
 
@@ -55,16 +57,16 @@ namespace Duplicati.Server.WebServer
             }
         }
 
-        public static void HandleControlCGI(HttpServer.IHttpRequest request, HttpServer.IHttpResponse response, HttpServer.Sessions.IHttpSession session, BodyWriter bw, Type module)
+        public static void HandleControlCGI(HttpServer.IHttpRequest request, HttpServer.IHttpResponse response, HttpServer.Sessions.IHttpSession session, Type module)
         {
             var method = request.Method;
             if (!string.IsNullOrWhiteSpace(request.Headers["X-HTTP-Method-Override"]))
                 method = request.Headers["X-HTTP-Method-Override"];
             
-            DoProcess(request, response, session, method, module.Name.ToLowerInvariant(), (request.Method.ToUpper() == "POST" ? request.Form : request.QueryString)["id"].Value);
+            DoProcess(request, response, session, method, module.Name.ToLowerInvariant(), (String.Equals(request.Method, "POST", StringComparison.OrdinalIgnoreCase) ? request.Form : request.QueryString)["id"].Value);
         }
 
-        private static Dictionary<string, System.Globalization.CultureInfo> _cultureCache = new Dictionary<string, System.Globalization.CultureInfo>(StringComparer.OrdinalIgnoreCase);
+        private static readonly ConcurrentDictionary<string, System.Globalization.CultureInfo> _cultureCache = new ConcurrentDictionary<string, System.Globalization.CultureInfo>(StringComparer.OrdinalIgnoreCase);
 
         private static System.Globalization.CultureInfo ParseRequestCulture(RequestInfo info)
         {
@@ -98,7 +100,7 @@ namespace Duplicati.Server.WebServer
                     var opts = x.Split(new[] { ";" }, StringSplitOptions.RemoveEmptyEntries);
                     var lang = opts.FirstOrDefault();
                     var weight =
-                    opts.Where(y => y.StartsWith("q=", StringComparison.InvariantCultureIgnoreCase))
+                    opts.Where(y => y.StartsWith("q=", StringComparison.OrdinalIgnoreCase))
                         .Select(y =>
                         {
                             float f;
@@ -142,7 +144,7 @@ namespace Duplicati.Server.WebServer
                     info.Response.Status = System.Net.HttpStatusCode.NotFound;
                     info.Response.Reason = "No such module";
                 }
-                else if (method == HttpServer.Method.Get && mod is IRESTMethodGET)
+                else if (method == HttpServer.Method.Get && mod is IRESTMethodGET get)
                 {
                     if (info.Request.Form != HttpServer.HttpForm.EmptyForm)
                     {
@@ -156,13 +158,13 @@ namespace Duplicati.Server.WebServer
                             if (!info.Request.QueryString.Contains(v.Name))
                                 info.Request.QueryString.Add(v.Name, v.Value);
                     }
-                    ((IRESTMethodGET)mod).GET(key, info);
+                    get.GET(key, info);
                 }
-                else if (method == HttpServer.Method.Put && mod is IRESTMethodPUT)
-                    ((IRESTMethodPUT)mod).PUT(key, info);
-                else if (method == HttpServer.Method.Post && mod is IRESTMethodPOST)
+                else if (method == HttpServer.Method.Put && mod is IRESTMethodPUT put)
+                    put.PUT(key, info);
+                else if (method == HttpServer.Method.Post && mod is IRESTMethodPOST post)
                 {
-                    if (info.Request.Form == HttpServer.HttpForm.EmptyForm)
+                    if (info.Request.Form == HttpServer.HttpForm.EmptyForm || info.Request.Form == HttpServer.HttpInput.Empty)
                     {
                         var r = info.Request.GetType().GetMethod("AssignForm", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance, null, new Type[] { typeof(HttpServer.HttpForm) }, null);
                         r.Invoke(info.Request, new object[] { new HttpServer.HttpForm(info.Request.QueryString) });
@@ -173,12 +175,12 @@ namespace Duplicati.Server.WebServer
                             if (!info.Request.Form.Contains(v.Name))
                                 info.Request.Form.Add(v.Name, v.Value);
                     }
-                    ((IRESTMethodPOST)mod).POST(key, info);
+                    post.POST(key, info);
                 }
-                else if (method == HttpServer.Method.Delete && mod is IRESTMethodDELETE)
-                    ((IRESTMethodDELETE)mod).DELETE(key, info);
-                else if (method == "PATCH" && mod is IRESTMethodPATCH)
-                    ((IRESTMethodPATCH)mod).PATCH(key, info);
+                else if (method == HttpServer.Method.Delete && mod is IRESTMethodDELETE delete)
+                    delete.DELETE(key, info);
+                else if (method == "PATCH" && mod is IRESTMethodPATCH patch)
+                    patch.PATCH(key, info);
                 else
                 {
                     info.Response.Status = System.Net.HttpStatusCode.MethodNotAllowed;
@@ -188,7 +190,7 @@ namespace Duplicati.Server.WebServer
             catch(Exception ex)
             {
                 Program.DataConnection.LogError("", string.Format("Request for {0} gave error", info.Request.Uri), ex);
-                Console.WriteLine(ex.ToString());
+                Console.WriteLine(ex);
 
                 try
                 {
@@ -201,14 +203,13 @@ namespace Duplicati.Server.WebServer
                         var wex = ex;
                         while (wex is System.Reflection.TargetInvocationException && wex.InnerException != wex)
                             wex = wex.InnerException;
-                            
-
+                        
                         info.BodyWriter.WriteJsonObject(new
                         {
-                            Message = ex.Message,
-                            Type = ex.GetType().Name,
+                            Message = wex.Message,
+                            Type = wex.GetType().Name,
                             #if DEBUG
-                            Stacktrace = ex.ToString()
+                            Stacktrace = wex.ToString()
                             #endif
                         });
                         info.BodyWriter.Flush();
@@ -229,7 +230,7 @@ namespace Duplicati.Server.WebServer
             
         public override bool Process(HttpServer.IHttpRequest request, HttpServer.IHttpResponse response, HttpServer.Sessions.IHttpSession session)
         {
-            if (!request.Uri.AbsolutePath.StartsWith(API_URI_PATH, StringComparison.InvariantCultureIgnoreCase))
+            if (!request.Uri.AbsolutePath.StartsWith(API_URI_PATH, StringComparison.OrdinalIgnoreCase))
                 return false;
 
             var module = request.Uri.Segments.Skip(API_URI_SEGMENTS).FirstOrDefault();

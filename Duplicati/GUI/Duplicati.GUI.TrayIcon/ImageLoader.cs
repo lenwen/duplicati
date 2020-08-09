@@ -56,7 +56,7 @@ namespace Duplicati.GUI.TrayIcon
             if (ICONS.TryGetValue(cachename, out ico))
                 return ico;
 
-            if (!filename.EndsWith(".ico", StringComparison.InvariantCultureIgnoreCase))
+            if (!filename.EndsWith(".ico", StringComparison.OrdinalIgnoreCase))
                 using(var ms = new System.IO.MemoryStream())
                 {
                     Icon ic;
@@ -77,6 +77,7 @@ namespace Duplicati.GUI.TrayIcon
         }
 
         public const string NormalIcon = "Resources.TrayNormal.ico";
+        public const string WarningIcon = "Resources.TrayNormalWarning.ico";
         public const string ErrorIcon = "Resources.TrayNormalError.ico";
         public const string PauseIcon = "Resources.TrayNormalPause.ico";
         public const string WorkingIcon = "Resources.TrayWorking.ico";

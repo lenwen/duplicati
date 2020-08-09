@@ -48,6 +48,7 @@ namespace Duplicati.Library.Main
         PurgeBrokenFiles,
         PurgeFiles,
         SendMail,
+        Vacuum,
     }
 
     /// <summary>
@@ -77,7 +78,7 @@ namespace Duplicati.Library.Main
         Verified,
 
         /// <summary>
-        /// Indicattes that the remote volume should be deleted
+        /// Indicates that the remote volume should be deleted
         /// </summary>
         Deleting,
 

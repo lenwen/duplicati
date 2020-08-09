@@ -15,7 +15,6 @@
 //  You should have received a copy of the GNU Lesser General Public
 //  License along with this library; if not, write to the Free Software
 //  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA 02111-1307 USA
-using System;
 
 namespace Duplicati.Library.Utility
 {
@@ -35,6 +34,16 @@ namespace Duplicati.Library.Utility
             return First.Matches(entry, out result, out match) || Second.Matches(entry, out result, out match);
         }
 
+        /// <summary>
+        /// Returns MD5 hash of filter expression
+        /// </summary>
+        /// <returns>MD5 hash of filter expression</returns>
+        public string GetFilterHash()
+        {
+            var hash = MD5HashHelper.GetHash(new[] {First.GetFilterHash(), Second.GetFilterHash()});
+			return Utility.ByteArrayAsHexString(hash);
+        }
+
         public bool Empty { get { return First.Empty && Second.Empty; } }
         
         public static IFilter Join(IFilter first, IFilter second)
@@ -51,8 +60,8 @@ namespace Duplicati.Library.Utility
                 return first;
             else
             {
-                if (first is FilterExpression && second is FilterExpression && ((FilterExpression)first).Result == ((FilterExpression)second).Result)
-                    return FilterExpression.Combine((FilterExpression)first, (FilterExpression)second);
+                if (first is FilterExpression expression && second is FilterExpression filterExpression && expression.Result == filterExpression.Result)
+                    return FilterExpression.Combine(expression, filterExpression);
                 
                 return new JoinedFilterExpression(first, second);
             }
@@ -65,7 +74,7 @@ namespace Duplicati.Library.Utility
             else if (this.Second.Empty)
                 return this.First.ToString();
             else
-                return "(" + this.First.ToString() + ") || (" + this.Second.ToString() + ")";
+                return "(" + this.First + ") || (" + this.Second + ")";
         }
     }
 }

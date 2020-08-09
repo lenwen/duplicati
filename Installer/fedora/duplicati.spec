@@ -42,13 +42,14 @@ Patch1:	%{namer}-0001-remove-unittest.patch
 BuildRequires:  mono-devel gnome-sharp-devel
 BuildRequires:  desktop-file-utils
 BuildRequires:  dos2unix
+BuildRequires:  systemd
 
 Requires:	desktop-file-utils
 Requires:	bash
 Requires:	sqlite >= 3.6.12
 Requires:	mono(appindicator-sharp)
 Requires:	libappindicator
-Requires:	mono-core >= 3.0
+Requires:	mono-core >= 5.10.0
 Requires:	mono-data-sqlite
 Requires:	mono(System)
 Requires:	mono(System.Configuration)
@@ -143,13 +144,9 @@ rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/win-tools
 rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/SQLite/win64
 rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/SQLite/win32
 rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/MonoMac.dll
-rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/alphavss
 rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/OSX\ Icons
 rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/OSXTrayHost
-rm Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/AlphaFS.dll
-rm Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/AlphaVSS.Common.dll
 
-rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/licenses/alphavss
 rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/licenses/MonoMac
 rm -rf Duplicati/GUI/Duplicati.GUI.TrayIcon/bin/Release/licenses/gpg
 
@@ -201,15 +198,25 @@ mv Duplicati/Library/Snapshots/lvm-scripts/create-lvm-snapshot.sh Tools/
 mv Duplicati/Library/Snapshots/lvm-scripts/find-volume.sh Tools/
 mv Duplicati/Library/Modules/Builtin/run-script-example.sh Tools/
 
+# Install the service:
+install -p -D -m 755 Installer/fedora/%{namer}.service %{_unitdir}
+install -p -D -m 644 Installer/fedora/%{namer}.default %{_sysconfdir}/sysconfig/
+
+
 %post
 /bin/touch --no-create %{_datadir}/icons/hicolor || :
 %{_bindir}/gtk-update-icon-cache \
   --quiet %{_datadir}/icons/hicolor 2> /dev/null|| :
+%systemd_post %{namer}.service
+
+%preun
+%systemd_preun %{namer}.service
 
 %postun
 /bin/touch --no-create %{_datadir}/icons/hicolor || :
 %{_bindir}/gtk-update-icon-cache \
   --quiet %{_datadir}/icons/hicolor 2> /dev/null|| :
+%systemd_postun_with_restart %{namer}.service
 
 %posttrans
 /usr/bin/gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
@@ -223,6 +230,9 @@ mv Duplicati/Library/Modules/Builtin/run-script-example.sh Tools/
 
 
 %changelog
+* Wed Jun 21 2017 Kenneth Skovhede <kenneth@duplicati.com> - 2.0.0-0.20170621.git
+- Added the service file to the install
+
 * Fri Jan 13 2017 Kenneth Skovhede <kenneth@duplicati.com> - 2.0.0-0.20170113.git
 - Fixed NuGet restore
 

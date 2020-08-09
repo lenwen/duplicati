@@ -1,5 +1,7 @@
 backupApp.controller('EditBackupController', function ($rootScope, $scope, $routeParams, $location, $timeout, AppService, AppUtils, SystemInfo, DialogService, EditBackupService, gettext, gettextCatalog) {
 
+    var SMART_RETENTION = '1W:1D,4W:1W,12M:1M';
+
     $scope.SystemInfo = SystemInfo.watch($scope);
     $scope.AppUtils = AppUtils;
 
@@ -14,8 +16,8 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
     $scope.ExcludeLargeFiles = false;
 
     $scope.fileAttributes = [
-        {'name': gettextCatalog.getString('Hidden files'), 'value': 'hidden'}, 
-        {'name': gettextCatalog.getString('System files'), 'value': 'system'}, 
+        {'name': gettextCatalog.getString('Hidden files'), 'value': 'hidden'},
+        {'name': gettextCatalog.getString('System files'), 'value': 'system'},
         {'name': gettextCatalog.getString('Temporary files'), 'value': 'temporary'}
     ];
 
@@ -24,7 +26,7 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
     function computePassPhraseStrength() {
 
         var strengthMap = {
-            'x': gettextCatalog.getString("Passwords do not match"),
+            'x': gettextCatalog.getString("Passphrases do not match"),
             0: gettextCatalog.getString("Useless"),
             1: gettextCatalog.getString("Very weak"),
             2: gettextCatalog.getString("Weak"),
@@ -34,18 +36,38 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
 
         var passphrase = scope.Options == null ? '' : scope.Options['passphrase'];
 
-        if (scope.RepeatPasshrase != passphrase) 
+        if (scope.RepeatPasshrase != passphrase)
             scope.PassphraseScore = 'x';
         else if ((passphrase || '') == '')
             scope.PassphraseScore = '';
         else
-            scope.PassphraseScore = (zxcvbn(passphrase) || {'score': -1}).score;
+            scope.PassphraseScore = (zxcvbn(passphrase.substring(0, 100)) || {'score': -1}).score;
 
         scope.PassphraseScoreString = strengthMap[scope.PassphraseScore];
     }
 
     $scope.$watch('Options["passphrase"]', computePassPhraseStrength);
     $scope.$watch('RepeatPasshrase', computePassPhraseStrength);
+
+    $scope.checkGpgAsymmetric = function() {
+        if (!this.Options) {
+            return false;
+        }
+
+        if (!('encryption-module' in this.Options)) {
+            return false;
+        }
+
+        if (!this.Options['encryption-module']) {
+            return false;
+        }
+
+        if (this.Options['encryption-module'].indexOf('gpg') < 0) {
+            return false;
+        }
+
+        return this.ExtendedOptions.includes('--gpg-encryption-command=--encrypt');
+    }
 
     $scope.generatePassphrase = function() {
         this.Options["passphrase"] = this.RepeatPasshrase = AppUtils.generatePassphrase();
@@ -219,8 +241,7 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
             return;
         }
 
-
-        if (encryptionEnabled) {
+        if (encryptionEnabled && !$scope.checkGpgAsymmetric()) {
             if ($scope.PassphraseScore === '') {
                 DialogService.dialog(gettextCatalog.getString('Missing passphrase'), gettextCatalog.getString('You must enter a passphrase or disable encryption'));
                 $scope.CurrentStep = 0;
@@ -240,10 +261,27 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
             return;
         }
 
-        if ($scope.KeepType == 'time' || $scope.KeepType == '')
-            delete opts['keep-versions'];
-        if ($scope.KeepType == 'versions' || $scope.KeepType == '')
-            delete opts['keep-time'];
+        // Retention options are mutual exclusive -> allow only one to be selected at a time
+        function resetAllRetentionOptionsExcept(optionToKeep) {
+            ['keep-versions', 'keep-time', 'retention-policy'].forEach(function(entry) {
+                if (entry != optionToKeep) {
+                    delete opts[entry];
+                }
+            });
+        }
+
+        if ($scope.KeepType == 'time') {
+            resetAllRetentionOptionsExcept('keep-time');
+
+        } else if ($scope.KeepType == 'versions') {
+            resetAllRetentionOptionsExcept('keep-versions');
+
+        } else if ($scope.KeepType == 'smart' || $scope.KeepType == 'custom') {
+            resetAllRetentionOptionsExcept('retention-policy');
+
+        } else {
+            resetAllRetentionOptionsExcept(); // keep none
+        }
 
         if ($scope.KeepType == 'time' && (opts['keep-time'] || '').trim().length == 0)
         {
@@ -258,6 +296,19 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
             $scope.CurrentStep = 4;
             return;
         }
+
+        var retentionPolicy = (opts['retention-policy'] || '');
+        var valid_chars = /^((\d+[smhDWMY]|U):(\d+[smhDWMY]|U),?)+$/;
+        var valid_commas = /^(\d*\w:\d*\w,)*\d*\w:\d*\w$/;
+        if ($scope.KeepType == 'custom' && (retentionPolicy.indexOf(':') <= 0 || valid_chars.test(retentionPolicy) === false || valid_commas.test(retentionPolicy) === false))
+        {
+            DialogService.dialog(gettextCatalog.getString('Invalid retention time'), gettextCatalog.getString('You must enter a valid retention policy string'));
+            $scope.CurrentStep = 4;
+            return;
+        }
+
+        if ($scope.KeepType == 'smart')
+            opts['retention-policy'] = SMART_RETENTION;
 
 
         result.Backup.Settings = [];
@@ -305,7 +356,7 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
             if (!$scope.HasGeneratedPassphrase || !encryptionEnabled)
                 continuation();
             else
-                DialogService.dialog(gettextCatalog.getString('Autogenerated passphrase'), gettextCatalog.getString('You have generated a strong passphrase. Make sure you have made a safe copy of the passphrase, as the data cannot be recovered if you loose the passphrase.'), [gettextCatalog.getString('Cancel'), gettextCatalog.getString('Yes, I have stored the passphrase safely')], function(ix) {
+                DialogService.dialog(gettextCatalog.getString('Autogenerated passphrase'), gettextCatalog.getString('You have generated a strong passphrase. Make sure you have made a safe copy of the passphrase, as the data cannot be recovered if you lose the passphrase.'), [gettextCatalog.getString('Cancel'), gettextCatalog.getString('Yes, I have stored the passphrase safely')], function(ix) {
                     if (ix == 0)
                         $scope.CurrentStep = 0;
                     else
@@ -344,14 +395,14 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
                         $scope.CurrentStep = 0;
                     else
                         continuation();
-                });                
+                });
             }
             else if (encryptionEnabled != previousEncryptionEnabled || encryptionModule != previousEncryptionModule)
             {
                 DialogService.dialog(gettextCatalog.getString('Encryption changed'), gettextCatalog.getString('You have changed the encryption mode. This may break stuff. You are encouraged to create a new backup instead'), [gettextCatalog.getString('Cancel'), gettextCatalog.getString('Yes, I\'m brave!')], function(ix) {
                     if (ix == 1)
                         continuation();
-                });    
+                });
             }
             else
                 continuation();
@@ -389,7 +440,7 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
             function postDb() {
                 AppService.post('/backups', result, {'headers': {'Content-Type': 'application/json'}}).then(function() {
                     $location.path('/');
-                }, AppUtils.connectionError);                                
+                }, AppUtils.connectionError);
             };
 
             function checkForExistingDb(continuation) {
@@ -458,6 +509,13 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
         var filters = $scope.Backup.Filters;
         $scope.Backup.Filters = [];
 
+        // If Description is anything other than a string, we are either creating a new
+        // backup or something went wrong when retrieving an existing one
+        // Either way we should set it to an empty string
+        if (typeof $scope.Backup.Description !== 'string') {
+            $scope.Backup.Description = '';
+        }
+
         $scope.Backup.Sources = $scope.Backup.Sources || [];
 
         for(var ix in filters)
@@ -471,9 +529,9 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
         var dispattr = [];
         var dispmap = {};
 
-        for (var i = exclattr.length - 1; i >= 0; i--) {            
+        for (var i = exclattr.length - 1; i >= 0; i--) {
             var cmp = (exclattr[i] || '').trim().toLowerCase();
-            
+
             // Remove empty entries
             if (cmp.length == 0) {
                 exclattr.splice(i, 1);
@@ -488,7 +546,7 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
                         dispmap[cmp] = true;
                     }
                     exclattr.splice(i, 1);
-                    break;                    
+                    break;
                 }
             }
         }
@@ -511,13 +569,20 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
             $scope.Options['keep-versions'] = parseInt($scope.Options['keep-versions']);
             $scope.KeepType = 'versions';
         }
+        else if (($scope.Options['retention-policy'] || '').trim().length != 0)
+        {
+            if (($scope.Options['retention-policy'] || '').trim() == SMART_RETENTION)
+                $scope.KeepType = 'smart';
+            else
+                $scope.KeepType = 'custom';
+        }
 
         var delopts = ['--skip-files-larger-than', '--no-encryption'];
         for(var n in delopts)
             delete extopts[delopts[n]];
 
         $scope.ExtendedOptions = AppUtils.serializeAdvancedOptionsToArray(extopts);
-        
+
         $scope.servermodulesettings = {};
         AppUtils.extractServerModuleOptions($scope.ExtendedOptions, $scope.ServerModules, $scope.servermodulesettings, 'SupportedLocalCommands');
 
@@ -580,10 +645,10 @@ backupApp.controller('EditBackupController', function ($rootScope, $scope, $rout
         if (ix > 0)
             backmodule = backmodule.substr(0, ix);
 
-        $scope.ExtendedOptionList = AppUtils.buildOptionList($scope.SystemInfo, encmodule, compmodule, backmodule);        
+        $scope.ExtendedOptionList = AppUtils.buildOptionList($scope.SystemInfo, encmodule, compmodule, backmodule);
         setupServerModules();
-        
-        AppUtils.extractServerModuleOptions($scope.ExtendedOptions, $scope.ServerModules, $scope.servermodulesettings, 'SupportedLocalCommands');        
+
+        AppUtils.extractServerModuleOptions($scope.ExtendedOptions, $scope.ServerModules, $scope.servermodulesettings, 'SupportedLocalCommands');
     };
 
     function checkAllowedDaysConfig()

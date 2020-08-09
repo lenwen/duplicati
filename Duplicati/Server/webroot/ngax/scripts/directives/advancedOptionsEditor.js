@@ -26,7 +26,6 @@ backupApp.directive('advancedOptionsEditor', function() {
                 'throttle-download': 'speed',
 
                 'retry-delay': 'shorttimespan',
-                'amzcd-consistency-delay': 'shorttimespan',
                 'web-timeout': 'shorttimespan',
                 'run-script-timeout': 'shorttimespan'
             };
@@ -117,6 +116,14 @@ backupApp.directive('advancedOptionsEditor', function() {
                     return null;
 
                 return item.LongDescription;
+            };
+
+            $scope.getDefaultValue = function(item) {
+                var item = $scope.getEntry(item);
+                if (item == null)
+                    return null;
+
+                return item.DefaultValue;
             };
 
             $scope.getEnumerations = function(item) {

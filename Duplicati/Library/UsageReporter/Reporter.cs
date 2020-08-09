@@ -26,6 +26,11 @@ namespace Duplicati.Library.UsageReporter
     public static class Reporter
     {
         /// <summary>
+        /// The tag used for logging
+        /// </summary>
+        private static readonly string LOGTAG = Logging.Log.LogTagFromType(typeof(Reporter));
+        
+        /// <summary>
         /// The primary input channel for new report messages
         /// </summary>
         private static IWriteChannel<ReportItem> _eventChannel;
@@ -78,7 +83,7 @@ namespace Duplicati.Library.UsageReporter
         /// </summary>
         public static void Initialize()
         {
-            if (_eventChannel == null || _eventChannel.IsRetired)
+            if (_eventChannel == null || _eventChannel.IsRetiredAsync.Result)
             {
                 if (IsDisabled)
                     return;
@@ -106,8 +111,8 @@ namespace Duplicati.Library.UsageReporter
         /// <param name="args">Arguments.</param>
         private static void HandleUncaughtException(object sender, UnhandledExceptionEventArgs args)
         {
-            if (args.ExceptionObject is Exception)
-                Report(args.ExceptionObject as Exception, ReportType.Crash);
+            if (args.ExceptionObject is Exception exception)
+                Report(exception, ReportType.Crash);
         }
 
         /// <summary>
@@ -115,14 +120,14 @@ namespace Duplicati.Library.UsageReporter
         /// </summary>
         public static void ShutDown()
         {
-            if (_eventChannel != null && !_eventChannel.IsRetired)
+            if (_eventChannel != null && !_eventChannel.IsRetiredAsync.Result)
                 _eventChannel.Retire();
 
             if (ShutdownTask != null)
             {
                 ShutdownTask.Wait(TimeSpan.FromSeconds(30));
                 if (!ShutdownTask.IsCompleted)
-                    Logging.Log.WriteMessage("Failed to shut down usage reporter after 30 seconds, leaving hanging ...", Logging.LogMessageType.Warning);
+                    Logging.Log.WriteWarningMessage(LOGTAG, "ReporterShutdownFailuer", null, "Failed to shut down usage reporter after 30 seconds, leaving hanging ...");
             }
 
             AppDomain.CurrentDomain.UnhandledException -= HandleUncaughtException;
@@ -157,7 +162,7 @@ namespace Duplicati.Library.UsageReporter
         }
 
         /// <summary>
-        /// The maxmimum allowed report level
+        /// The maximum allowed report level
         /// </summary>
         /// <value>The type of the max report.</value>
         private static ReportType MaxReportLevel
@@ -168,7 +173,7 @@ namespace Duplicati.Library.UsageReporter
                 {
                     var str = Environment.GetEnvironmentVariable(string.Format(DISABLED_ENVNAME_TEMPLATE, AutoUpdater.AutoUpdateSettings.AppName));
                     ReportType tmp;
-                    if (string.IsNullOrWhiteSpace(str) || !Enum.TryParse(str, out tmp))
+                    if (string.IsNullOrWhiteSpace(str) || !Enum.TryParse(str, true, out tmp))
                         Cached_MaxReportLevel = ReportType.Information;
                     else
                         Cached_MaxReportLevel = tmp;
@@ -208,7 +213,7 @@ namespace Duplicati.Library.UsageReporter
                 if (string.IsNullOrWhiteSpace(str))
                     str = "none";
 #endif
-                return string.Equals(str, "none", StringComparison.InvariantCultureIgnoreCase) || Utility.Utility.ParseBool(str, false);
+                return string.Equals(str, "none", StringComparison.OrdinalIgnoreCase) || Utility.Utility.ParseBool(str, false);
             }
         }
 

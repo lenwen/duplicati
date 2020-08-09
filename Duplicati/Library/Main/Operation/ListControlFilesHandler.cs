@@ -18,14 +18,15 @@
 using System;
 using System.Linq;
 using System.Collections.Generic;
+using Duplicati.Library.Main.Database;
 
 namespace Duplicati.Library.Main.Operation
 {
     internal class ListControlFilesHandler
     {
-        private Options m_options;
-        private string m_backendurl;
-        private ListResults m_result;
+        private readonly Options m_options;
+        private readonly string m_backendurl;
+        private readonly ListResults m_result;
         
         public ListControlFilesHandler(string backendurl, Options options, ListResults result)
         {
@@ -59,21 +60,16 @@ namespace Duplicati.Library.Main.Operation
                                 return;
                         
                             var file = fileversion.Value.File;
-                            long size;
-                            string hash;
-                            RemoteVolumeType type;
-                            RemoteVolumeState state;
-                            if (!db.GetRemoteVolume(file.Name, out hash, out size, out type, out state))
-                                size = file.Size;
+                            var entry = db.GetRemoteVolume(file.Name);
     
                             var files = new List<Library.Interface.IListResultFile>();
-                            using (var tmpfile = backend.Get(file.Name, size, hash))
+                            using (var tmpfile = backend.Get(file.Name, entry.Size < 0 ? file.Size : entry.Size, entry.Hash))
                             using (var tmp = new Volumes.FilesetVolumeReader(RestoreHandler.GetCompressionModule(file.Name), tmpfile, m_options))
                                 foreach (var cf in tmp.ControlFiles)
                                     if (Library.Utility.FilterExpression.Matches(filter, cf.Key))
                                         files.Add(new ListResultFile(cf.Key, null));
                             
-                            m_result.SetResult(new Library.Interface.IListResultFileset[] { new ListResultFileset(fileversion.Key, fileversion.Value.Time, -1, -1) }, files);
+                            m_result.SetResult(new Library.Interface.IListResultFileset[] { new ListResultFileset(fileversion.Key, BackupType.PARTIAL_BACKUP, fileversion.Value.Time, -1, -1) }, files);
                             lastEx = null;
                             break;
                         }

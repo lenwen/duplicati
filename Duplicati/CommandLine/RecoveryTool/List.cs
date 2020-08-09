@@ -44,18 +44,18 @@ namespace Duplicati.CommandLine.RecoveryTool
             if (args.Count == 2)
             {
                 var times = ParseListFiles(folder);
-                foreach(var v in times.Zip(Enumerable.Range(0, times.Length), (a,b) => new KeyValuePair<int, DateTime>(b, a.Key)))
+                foreach (var v in times.Zip(Enumerable.Range(0, times.Length), (a, b) => new KeyValuePair<int, DateTime>(b, a.Key)))
                     Console.WriteLine("{0}: {1}", v.Key, v.Value.ToLocalTime());
             }
             else
             {
                 var file = SelectListFile(args[2], folder);
 
-                var p = Library.Main.Volumes.VolumeBase.ParseFilename(file);
+                var p = Library.Main.Volumes.VolumeBase.ParseFilename(Path.GetFileName(file));
 
                 Library.Main.Volumes.VolumeReaderBase.UpdateOptionsFromManifest(p.CompressionModule, file, new Duplicati.Library.Main.Options(options));
 
-                foreach(var f in EnumerateFilesInDList(file, filter, options))
+                foreach (var f in EnumerateFilesInDList(file, filter, options))
                     Console.WriteLine("{0} ({1})", f.Path, Library.Utility.Utility.FormatSizeString(f.Size));
             }
 
@@ -64,18 +64,18 @@ namespace Duplicati.CommandLine.RecoveryTool
 
         public static IEnumerable<Duplicati.Library.Main.Volumes.IFileEntry> EnumerateFilesInDList(string file, Duplicati.Library.Utility.IFilter filter, Dictionary<string, string> options)
         {
-            var p = Library.Main.Volumes.VolumeBase.ParseFilename(file);
-            using(var cm = Library.DynamicLoader.CompressionLoader.GetModule(p.CompressionModule, file, options))
-            using(var filesetreader = new Library.Main.Volumes.FilesetVolumeReader(cm, new Duplicati.Library.Main.Options(options)))
-                foreach(var f in filesetreader.Files)
+            var p = Library.Main.Volumes.VolumeBase.ParseFilename(Path.GetFileName(file));
+            using (var fs = new System.IO.FileStream(file, FileMode.Open, FileAccess.Read, FileShare.Read))
+            using (var cm = Library.DynamicLoader.CompressionLoader.GetModule(p.CompressionModule, fs, Library.Interface.ArchiveMode.Read, options))
+            using (var filesetreader = new Library.Main.Volumes.FilesetVolumeReader(cm, new Duplicati.Library.Main.Options(options)))
+                foreach (var f in filesetreader.Files)
                 {
                     if (f.Type != Duplicati.Library.Main.FilelistEntryType.File)
                         continue;
 
                     bool result;
-                    Library.Utility.IFilter evfilter;
-                    bool match = filter.Matches(f.Path, out result, out evfilter);
-                    if (!match || (match && result))
+                    bool match = filter.Matches(f.Path, out result, out _);
+                    if (!match || result)
                         yield return f;
                 }
         }
@@ -90,7 +90,7 @@ namespace Duplicati.CommandLine.RecoveryTool
             {
                 var items = ParseListFiles(folder);
                 if (index < 0 || index >= items.Length)
-                    throw new Duplicati.Library.Interface.UserInformationException(string.Format("Valid range for version is 0 to {1}", items.Length - 1));
+                    throw new Duplicati.Library.Interface.UserInformationException(string.Format("Valid range for version is 0 to {0}", items.Length - 1), "RecoveryToolInvalidVersion");
 
                 return items[index].Value;
             }
@@ -98,9 +98,9 @@ namespace Duplicati.CommandLine.RecoveryTool
             var parsedtime = Library.Utility.Timeparser.ParseTimeInterval(time, DateTime.Now, true);
             var el = (
                 from n in ParseListFiles(folder)
-                 let diff = Math.Abs((n.Key - parsedtime).TotalSeconds)
-                 orderby diff
-                 select n).First();
+                let diff = Math.Abs((n.Key - parsedtime).TotalSeconds)
+                orderby diff
+                select n).First();
 
             Console.WriteLine("Selected time {0}", el.Key);
 
@@ -112,7 +112,7 @@ namespace Duplicati.CommandLine.RecoveryTool
         {
             return (
                 from v in Directory.EnumerateFiles(folder)
-                let p = Library.Main.Volumes.VolumeBase.ParseFilename(v)
+                let p = Library.Main.Volumes.VolumeBase.ParseFilename(Path.GetFileName(v))
                 where p != null && p.FileType == Duplicati.Library.Main.RemoteVolumeType.Files
                 orderby p.Time descending
                 select new KeyValuePair<DateTime, string>(p.Time, v)).ToArray();

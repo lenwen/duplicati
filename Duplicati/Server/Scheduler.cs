@@ -34,10 +34,12 @@ namespace Duplicati.Server
     /// </summary>
     public class Scheduler
     {
+        private static readonly string LOGTAG = Duplicati.Library.Logging.Log.LogTagFromType<Scheduler>();
+
         /// <summary>
         /// The thread that runs the scheduler
         /// </summary>
-        private Thread m_thread;
+        private readonly Thread m_thread;
         /// <summary>
         /// A termination flag
         /// </summary>
@@ -45,15 +47,15 @@ namespace Duplicati.Server
         /// <summary>
         /// The worker thread that is invoked to do work
         /// </summary>
-        private WorkerThread<Runner.IRunnerData> m_worker;
+        private readonly WorkerThread<Runner.IRunnerData> m_worker;
         /// <summary>
         /// The wait event
         /// </summary>
-        private AutoResetEvent m_event;
+        private readonly AutoResetEvent m_event;
         /// <summary>
-        /// The data syncronization lock
+        /// The data synchronization lock
         /// </summary>
-        private object m_lock = new object();
+        private readonly object m_lock = new object();
 
         /// <summary>
         /// An event that is raised when the schedule changes
@@ -68,19 +70,18 @@ namespace Duplicati.Server
         /// <summary>
         /// List of update tasks, used to set the timestamp on the schedule once completed
         /// </summary>
-        private Dictionary<Server.Runner.IRunnerData, Tuple<ISchedule, DateTime, DateTime>> m_updateTasks;
+        private readonly Dictionary<Server.Runner.IRunnerData, Tuple<ISchedule, DateTime, DateTime>> m_updateTasks;
 
         /// <summary>
         /// Constructs a new scheduler
         /// </summary>
-        /// <param name="connection">The database connection</param>
         /// <param name="worker">The worker thread</param>
-        /// <param name="datalock">The database lock object</param>
         public Scheduler(WorkerThread<Server.Runner.IRunnerData> worker)
         {
             m_thread = new Thread(new ThreadStart(Runner));
             m_worker = worker;
             m_worker.CompletedWork += OnCompleted;
+            m_worker.StartingWork += OnStartingWork;
             m_schedule = new KeyValuePair<DateTime, ISchedule>[0];
             m_terminate = false;
             m_event = new AutoResetEvent(false);
@@ -151,7 +152,7 @@ namespace Duplicati.Server
             while (res < firstdate && i-- > 0)
                 res = Timeparser.ParseTimeInterval(repetition, res);
 
-            // If we arived somewhere after the first allowed date
+            // If we arrived somewhere after the first allowed date
             if (res >= firstdate)
             {
                 var ts = Timeparser.ParseTimeSpan(repetition);
@@ -174,7 +175,7 @@ namespace Duplicati.Server
                     i = 50000;
                     while (!IsDateAllowed(res, allowedDays) && i-- > 0)
                         res = Timeparser.ParseTimeInterval(repetition, res);
-            }
+                }
             }
 
             if (!IsDateAllowed(res, allowedDays) || res < firstdate)
@@ -211,7 +212,25 @@ namespace Duplicati.Server
             }
             
         }
-                
+
+        private void OnStartingWork(WorkerThread<Runner.IRunnerData> worker, Runner.IRunnerData task)
+        {
+            if (task is null)
+            {
+                return;
+            }
+            
+            lock(m_lock)
+            {
+                if (m_updateTasks.TryGetValue(task, out Tuple<ISchedule, DateTime, DateTime> scheduleInfo))
+                {
+                    // Item2 is the scheduled start time (Time in the Schedule table).
+                    // Item3 is the actual start time (LastRun in the Schedule table).
+                    m_updateTasks[task] = Tuple.Create(scheduleInfo.Item1, scheduleInfo.Item2, DateTime.UtcNow);
+                }
+            }
+        }
+
         /// <summary>
         /// The actual scheduling procedure
         /// </summary>
@@ -247,6 +266,12 @@ namespace Duplicati.Server
                         
                         try
                         {
+                            // Recover from timedrift issues by overriding the dates if the last run date is in the future.
+                            if (last > DateTime.UtcNow)
+                            {
+                                start = DateTime.UtcNow;
+                                last = DateTime.UtcNow;
+                            }
                             start = GetNextValidTime(start, last, sc.Repeat, sc.AllowedDays);
                         }
                         catch (Exception ex)
@@ -267,18 +292,29 @@ namespace Duplicati.Server
                                          select n.Backup;
                                 var tastTemp = m_worker.CurrentTask;
                                 if (tastTemp != null && tastTemp.Operation == Duplicati.Server.Serialization.DuplicatiOperation.Backup)
-                                    tmplst.Union(new [] { tastTemp.Backup });
-                            
+                                    tmplst = tmplst.Union(new [] { tastTemp.Backup });
+
                                 //If it is not already in queue, put it there
                                 if (!tmplst.Any(x => x.ID == id))
                                 {
                                     var entry = Program.DataConnection.GetBackup(id);
                                     if (entry != null)
-                                        jobsToRun.Add(Server.Runner.CreateTask(Duplicati.Server.Serialization.DuplicatiOperation.Backup, entry));
+                                    {
+                                        Dictionary<string, string> options = Duplicati.Server.Runner.GetCommonOptions();
+                                        Duplicati.Server.Runner.ApplyOptions(entry, options);
+                                        if ((new Duplicati.Library.Main.Options(options)).DisableOnBattery && (Duplicati.Library.Utility.Power.PowerSupply.GetSource() == Duplicati.Library.Utility.Power.PowerSupply.Source.Battery))
+                                        {
+                                            Duplicati.Library.Logging.Log.WriteInformationMessage(LOGTAG, "BackupDisabledOnBattery", "Scheduled backup disabled while on battery power.");
+                                        }
+                                        else
+                                        {
+                                            jobsToRun.Add(Server.Runner.CreateTask(Duplicati.Server.Serialization.DuplicatiOperation.Backup, entry));
+                                        }
+                                    }
                                 }
                             }
 
-                            //Caluclate next time, by finding the first entry later than now
+                            // Calculate next time, by finding the first entry later than now
                             try
                             {
                                 start = GetNextValidTime(start, new DateTime(Math.Max(DateTime.UtcNow.AddSeconds(1).Ticks, start.AddSeconds(1).Ticks), DateTimeKind.Utc), sc.Repeat, sc.AllowedDays);
@@ -290,11 +326,16 @@ namespace Duplicati.Server
                             }
                             
                             Server.Runner.IRunnerData lastJob = jobsToRun.LastOrDefault();
-                            if (lastJob != null && lastJob != null)
-                                lock(m_lock)
+                            if (lastJob != null)
+                            {
+                                lock (m_lock)
+                                {
+                                    // The actual last run time will be updated when the StartingWork event is raised.
                                     m_updateTasks[lastJob] = new Tuple<ISchedule, DateTime, DateTime>(sc, start, DateTime.UtcNow);
-                            
-                            foreach(var job in jobsToRun)
+                                }
+                            }
+
+                            foreach (var job in jobsToRun)
                                 m_worker.AddTask(job);
                             
                             if (start < DateTime.UtcNow)
@@ -357,10 +398,11 @@ namespace Duplicati.Server
         /// <returns>True if the backup is allowed to run, false otherwise</returns>
         private static bool IsDateAllowed(DateTime time, DayOfWeek[] allowedDays)
         {
+            var localTime = time.ToLocalTime();
             if (allowedDays == null || allowedDays.Length == 0)
                 return true;
             else
-                return Array.IndexOf<DayOfWeek>(allowedDays, time.DayOfWeek) >= 0; 
+                return Array.IndexOf<DayOfWeek>(allowedDays, localTime.DayOfWeek) >= 0; 
         }
 
     }

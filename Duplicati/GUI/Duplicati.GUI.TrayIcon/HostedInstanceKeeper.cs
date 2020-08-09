@@ -10,7 +10,7 @@ namespace Duplicati.GUI.TrayIcon
     /// </summary>
     internal class HostedInstanceKeeper : IDisposable
     {
-        private System.Threading.Thread m_runner;
+        private readonly System.Threading.Thread m_runner;
         private System.Exception m_runnerException = null;
         public event Action InstanceShutdown;
 
@@ -21,7 +21,7 @@ namespace Duplicati.GUI.TrayIcon
                 {
                     //When running the hosted instance we do not really care what port we are using,
                     // so we just throw a few out there and try them
-                    if (args == null || !args.Any(x => x.Trim().StartsWith("--" + Duplicati.Server.WebServer.Server.OPTION_PORT + "=", StringComparison.InvariantCultureIgnoreCase)))
+                    if (args == null || !args.Any(x => x.Trim().StartsWith("--" + Duplicati.Server.WebServer.Server.OPTION_PORT + "=", StringComparison.OrdinalIgnoreCase)))
                         args = (args ?? new string[0]).Union(new string[] { "--" + Duplicati.Server.WebServer.Server.OPTION_PORT + "=8200,8300,8400,8500,8600,8700,8800,8900,8989" }).ToArray();
                         
                     Duplicati.Server.Program.Main(args);
@@ -49,7 +49,7 @@ namespace Duplicati.GUI.TrayIcon
                 if (m_runnerException != null)
                     throw m_runnerException;
                 else
-                    throw new Duplicati.Library.Interface.UserInformationException("Hosted server startup timed out");
+                    throw new Duplicati.Library.Interface.UserInformationException("Hosted server startup timed out", "HostedStartupError");
             }
 
             if (m_runnerException != null)

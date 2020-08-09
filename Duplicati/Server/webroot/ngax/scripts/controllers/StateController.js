@@ -22,9 +22,9 @@ backupApp.controller('StateController', function($scope, $timeout, ServerStatus,
     };
 
     function updateStateDisplay() {
-        var text = gettextCatalog.getString('Running ...');
+        var text = gettextCatalog.getString('Running …');
         var pg = -1;
-        if ($scope.state.lastPgEvent != null)
+        if ($scope.state.lastPgEvent != null && $scope.state.activeTask != null)
         {
             text = ServerStatus.progress_state_text[$scope.state.lastPgEvent.Phase || ''] || $scope.state.lastPgEvent.Phase;
 
@@ -34,16 +34,21 @@ backupApp.controller('StateController', function($scope, $timeout, ServerStatus,
                     text = gettextCatalog.getString('Counting ({{files}} files found, {{size}})', { files: $scope.state.lastPgEvent.TotalFileCount, size: AppUtils.formatSizeString($scope.state.lastPgEvent.TotalFileSize) });
                     pg = 0;
                 } else {
+                    var unaccountedbytes = ($scope.state.lastPgEvent.CurrentFilecomplete) ? 0 : $scope.state.lastPgEvent.CurrentFileoffset;
                     var filesleft = $scope.state.lastPgEvent.TotalFileCount - $scope.state.lastPgEvent.ProcessedFileCount;
-                    var sizeleft = $scope.state.lastPgEvent.TotalFileSize - $scope.state.lastPgEvent.ProcessedFileSize - $scope.state.lastPgEvent.CurrentFileoffset;
-                    pg = ($scope.state.lastPgEvent.ProcessedFileSize + $scope.state.lastPgEvent.CurrentFileoffset) / $scope.state.lastPgEvent.TotalFileSize;
+                    var sizeleft = $scope.state.lastPgEvent.TotalFileSize - $scope.state.lastPgEvent.ProcessedFileSize - unaccountedbytes;
+                    pg = ($scope.state.lastPgEvent.ProcessedFileSize + unaccountedbytes) / $scope.state.lastPgEvent.TotalFileSize;
 
                     if ($scope.state.lastPgEvent.ProcessedFileCount == 0)
                         pg = 0;
                     else if (pg >= 0.90)
                         pg = 0.90;
-
-                    text = gettextCatalog.getString('{{files}} files ({{size}}) to go', { files: filesleft, size: AppUtils.formatSizeString(sizeleft) });
+                    
+                    // If we have a speed append it
+                    var speed_txt = ($scope.state.lastPgEvent.BackendSpeed < 0) ? "" : " at "+AppUtils.formatSizeString($scope.state.lastPgEvent.BackendSpeed)+"/s";
+                    
+                    // Finally construct the whole text
+                    text = gettextCatalog.getString('{{files}} files ({{size}}) to go {{speed_txt}}', { files: filesleft, size: AppUtils.formatSizeString(sizeleft), speed_txt: speed_txt});
                 }
             }
             else if ($scope.state.lastPgEvent.Phase == 'Backup_Finalize' || $scope.state.lastPgEvent.Phase == 'Backup_WaitForUpload')
@@ -61,7 +66,7 @@ backupApp.controller('StateController', function($scope, $timeout, ServerStatus,
             else if ($scope.state.lastPgEvent.Phase == 'Backup_Complete' || $scope.state.lastPgEvent.Phase == 'Backup_WaitForUpload')
             {
                 pg = 1;
-            } 
+            }
             else if ($scope.state.lastPgEvent.OverallProgress > 0) {
                 pg = $scope.state.lastPgEvent.OverallProgress;
             }
@@ -72,6 +77,7 @@ backupApp.controller('StateController', function($scope, $timeout, ServerStatus,
     };
 
     $scope.$watch('state.lastPgEvent', updateStateDisplay, true);
+    $scope.$on('serverstatechanged', updateStateDisplay);
 
     $scope.stopDialog = function() {
         if ($scope.activeTaskID == null)
@@ -83,28 +89,30 @@ backupApp.controller('StateController', function($scope, $timeout, ServerStatus,
         function handleClick(ix) {
             if (ix == 0) 
             {
-                AppService.post('/task/' + taskId + '/stop');
+                AppService.post('/task/' + taskId + '/stopaftercurrentfile');
                 $scope.StopReqId = taskId;
             }
-            else if (ix == 1)
-                AppService.post('/task/' + taskId + '/abort');
+            else if (ix == 1) {
+                AppService.post('/task/' + taskId + '/stopnow');
+                $scope.StopReqId = taskId;
+            }
         };
 
         if (txt.indexOf('Backup_') == 0)
         {
             DialogService.dialog(
-                gettextCatalog.getString('Stop running backup'),
-                gettextCatalog.getString('You can stop the backup immediately, or stop after the current file has been uploaded.'),
-                [gettextCatalog.getString('Stop after upload'), gettextCatalog.getString('Stop now'), gettextCatalog.getString('Cancel')],
+                gettextCatalog.getString("Stop running backup"),
+                gettextCatalog.getString("You can stop the backup after any file uploads currently in progress have finished."),
+                [gettextCatalog.getString("Stop after current file"), gettextCatalog.getString("Stop now"), gettextCatalog.getString("Cancel")],
                 handleClick
             );
         }
         else
         {
             DialogService.dialog(
-                gettextCatalog.getString('Stop running task'),
-                gettextCatalog.getString('You can stop the task immediately, or allow the process to continue its current file and the stop.'),
-                [gettextCatalog.getString('Stop after the current file'), gettextCatalog.getString('Stop now'), gettextCatalog.getString('Cancel')],
+                gettextCatalog.getString("Stop running task"),
+                gettextCatalog.getString("You can stop the task immediately, or allow the process to continue its current file and then stop."),
+                [gettextCatalog.getString("Stop after the current file"), gettextCatalog.getString("Stop now"), gettextCatalog.getString("Cancel")],
                 handleClick
             );
         }

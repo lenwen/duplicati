@@ -26,10 +26,13 @@ MONO=/Library/Frameworks/Mono.framework/Commands/mono
 
 GPG=/usr/local/bin/gpg2
 
-ZIPFILE=`basename "$1"`
-VERSION=`echo "${ZIPFILE}" | cut -d "-" -f 2 | cut -d "_" -f 1`
-BUILDTYPE=`echo "${ZIPFILE}" | cut -d "-" -f 2 | cut -d "_" -f 2`
-BUILDTAG_RAW=`echo "${ZIPFILE}" | cut -d "." -f 1-4 | cut -d "-" -f 2-4`
+# Newer GPG needs this to allow input from a non-terminal
+export GPG_TTY=$(tty)
+
+ZIPFILE=$(basename "$1")
+VERSION=$(echo "${ZIPFILE}" | cut -d "-" -f 2 | cut -d "_" -f 1)
+BUILDTYPE=$(echo "${ZIPFILE}" | cut -d "-" -f 2 | cut -d "_" -f 2)
+BUILDTAG_RAW=$(echo "${ZIPFILE}" | cut -d "." -f 1-4 | cut -d "-" -f 2-4)
 BUILDTAG="${BUILDTAG_RAW//-}"
 
 RPMNAME="duplicati-${VERSION}-${BUILDTAG}.noarch.rpm"
@@ -52,9 +55,18 @@ echo "DEBName: ${DEBNAME}"
 echo "SPKName: ${SPKNAME}"
 
 build_file_signatures() {
-	if [ "z${GPGID}" != "z" ]; then
-		echo "$GPGKEY" | "${GPG}" "--passphrase-fd" "0" "--batch" "--yes" "--default-key=${GPGID}" "--output" "$2.sig" "--detach-sig" "$1"
-		echo "$GPGKEY" | "${GPG}" "--passphrase-fd" "0" "--batch" "--yes" "--default-key=${GPGID}" "--armor" "--output" "$2.sig.asc" "--detach-sig" "$1"
+	if [ -f "${GPG_KEYFILE}" ]; then
+		"${MONO}" "BuildTools/GnupgSigningTool/bin/Debug/GnupgSigningTool.exe" \
+		--inputfile=\"$1\" \
+		--signaturefile=\"$2.sig\" \
+		--armor=false --gpgkeyfile="${GPG_KEYFILE}" --gpgpath="${GPG}" \
+		--keyfile-password="${KEYFILE_PASSWORD}"
+
+		"${MONO}" "BuildTools/GnupgSigningTool/bin/Debug/GnupgSigningTool.exe" \
+		--inputfile=\"$1\" \
+		--signaturefile=\"$2.sig.asc\" \
+		--armor=true --gpgkeyfile="${GPG_KEYFILE}" --gpgpath="${GPG}" \
+		--keyfile-password="${KEYFILE_PASSWORD}"
 	fi
 
 	md5 "$1" | awk -F ' ' '{print $NF}' > "$2.md5"
@@ -69,13 +81,13 @@ if [ -f "${GPG_KEYFILE}" ]; then
 		echo
 	fi
 
-	GPGDATA=`"${MONO}" "BuildTools/AutoUpdateBuilder/bin/Debug/SharpAESCrypt.exe" d "${KEYFILE_PASSWORD}" "${GPG_KEYFILE}"`
+	GPGDATA=$("${MONO}" "BuildTools/AutoUpdateBuilder/bin/Debug/SharpAESCrypt.exe" d "${KEYFILE_PASSWORD}" "${GPG_KEYFILE}")
 	if [ ! $? -eq 0 ]; then
 		echo "Decrypting GPG keyfile failed"
 		exit 1
 	fi
-	GPGID=`echo "${GPGDATA}" | head -n 1`
-	GPGKEY=`echo "${GPGDATA}" | head -n 2 | tail -n 1`
+	GPGID=$(echo "${GPGDATA}" | head -n 1)
+	GPGKEY=$(echo "${GPGDATA}" | head -n 2 | tail -n 1)
 else
 	echo "No GPG keyfile found, skipping gpg signatures"
 fi
@@ -97,6 +109,8 @@ cd "Installer/OSX"
 bash "make-dmg.sh" "../../$1"
 mv "Duplicati.dmg" "../../${UPDATE_TARGET}/${DMGNAME}"
 mv "Duplicati.pkg" "../../${UPDATE_TARGET}/${PKGNAME}"
+
+
 cd "../.."
 
 echo ""
@@ -138,7 +152,29 @@ echo "Done building rpm package"
 
 echo ""
 echo ""
+echo "Building Docker images ..."
+
+cd Installer/Docker
+bash build-images.sh ../../$1
+cd ../..
+
+echo "Done building Docker images"
+
+
+echo ""
+echo ""
 echo "Building Windows instance in virtual machine"
+
+while true
+do
+    ssh -o ConnectTimeout=5 IEUser@192.168.56.101 "dir"
+    if [ $? -eq 255 ]; then
+    	echo "Windows Build machine is not responding, try restarting it"
+        read -p "Press [Enter] key to try again"
+        continue
+    fi
+    break
+done
 
 cat > "tmp-windows-commands.bat" <<EOF
 SET VS120COMNTOOLS=%VS140COMNTOOLS%
@@ -166,14 +202,14 @@ if [ -f "${AUTHENTICODE_PFXFILE}" ] && [ -f "${AUTHENTICODE_PASSWORD}" ]; then
 	authenticode_sign() {
 		NEST=""
 		for hashalg in sha1 sha256; do
-			SIGN_MSG=`osslsigncode sign -pkcs12 "${AUTHENTICODE_PFXFILE}" -pass "${PFX_PASS}" -n "Duplicati" -i "http://www.duplicati.com" -h "${hashalg}" ${NEST} -t "http://timestamp.verisign.com/scripts/timstamp.dll" -in "$1" -out tmpfile`
+			SIGN_MSG=$(osslsigncode sign -pkcs12 "${AUTHENTICODE_PFXFILE}" -pass "${PFX_PASS}" -n "Duplicati" -i "http://www.duplicati.com" -h "${hashalg}" ${NEST} -t "http://timestamp.verisign.com/scripts/timstamp.dll" -in "$1" -out tmpfile)
 			if [ "${SIGN_MSG}" != "Succeeded" ]; then echo "${SIGN_MSG}"; fi
 			mv tmpfile "$1"
 			NEST="-nest"
 		done
 	}
 
-	PFX_PASS=`"${MONO}" "BuildTools/AutoUpdateBuilder/bin/Debug/SharpAESCrypt.exe" d "${KEYFILE_PASSWORD}" "${AUTHENTICODE_PASSWORD}"`
+	PFX_PASS=$("${MONO}" "BuildTools/AutoUpdateBuilder/bin/Debug/SharpAESCrypt.exe" d "${KEYFILE_PASSWORD}" "${AUTHENTICODE_PASSWORD}")
 
 	DECRYPT_STATUS=$?
 	if [ "${DECRYPT_STATUS}" -ne 0 ]; then
@@ -195,6 +231,14 @@ fi
 
 echo ""
 echo ""
+echo "Performing macOS notarization ..."
+
+# Notarize and staple, cannot run in parallel but takes a while
+bash Installer/OSX/notarize-and-staple.sh "${UPDATE_TARGET}/${DMGNAME}"
+bash Installer/OSX/notarize-and-staple.sh "${UPDATE_TARGET}/${PKGNAME}"
+
+echo ""
+echo ""
 echo "Done building, uploading installers ..."
 
 if [ -d "./tmp" ]; then
@@ -210,9 +254,9 @@ process_installer() {
 		aws --profile=duplicati-upload s3 cp "${UPDATE_TARGET}/$1" "s3://updates.duplicati.com/${BUILDTYPE}/$1"
 	fi
 
-	local MD5=`md5 ${UPDATE_TARGET}/$1 | awk -F ' ' '{print $NF}'`
-	local SHA1=`shasum -a 1 ${UPDATE_TARGET}/$1 | awk -F ' ' '{print $1}'`
-	local SHA256=`shasum -a 256 ${UPDATE_TARGET}/$1 | awk -F ' ' '{print $1}'`
+	local MD5=$(md5 ${UPDATE_TARGET}/$1 | awk -F ' ' '{print $NF}')
+	local SHA1=$(shasum -a 1 ${UPDATE_TARGET}/$1 | awk -F ' ' '{print $1}')
+	local SHA256=$(shasum -a 256 ${UPDATE_TARGET}/$1 | awk -F ' ' '{print $1}')
 
 cat >> "./tmp/latest-installers.json" <<EOF
 	"$2": {
@@ -277,7 +321,7 @@ rm -rf "./tmp/${SIG_FOLDER}"
 
 aws --profile=duplicati-upload s3 cp "${UPDATE_TARGET}/${SIGNAME}" "s3://updates.duplicati.com/${BUILDTYPE}/${SIGNAME}"
 
-GITHUB_TOKEN=`cat "${GITHUB_TOKEN_FILE}"`
+GITHUB_TOKEN=$(cat "${GITHUB_TOKEN_FILE}")
 
 if [ "x${GITHUB_TOKEN}" == "x" ]; then
 	echo "No GITHUB_TOKEN found in environment, you can manually upload the binaries"

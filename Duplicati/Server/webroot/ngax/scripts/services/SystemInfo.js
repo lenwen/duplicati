@@ -57,18 +57,24 @@ backupApp.service('SystemInfo', function($rootScope, $timeout, $cookies, AppServ
                 'azure': null,
                 'googledrive': null,
                 'onedrive': null,
+                'onedrivev2': null,
+                'sharepoint': null,
+                'msgroup': null,
                 'cloudfiles': null,
                 'gcs': null,
                 'openstack': null,
                 'hubic': null,
-                'amzcd': null,
                 'b2': null,
                 'mega': null,
                 'box': null,
                 'od4b': null,
                 'mssp': null,
                 'dropbox': null,
-                'jottacloud': null
+                'sia': null,
+                'tardigrade': null,
+                'jottacloud': null,
+				'rclone': null,
+				'cos': null
             }
         };
 

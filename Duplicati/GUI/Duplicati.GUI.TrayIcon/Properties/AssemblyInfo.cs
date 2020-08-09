@@ -5,12 +5,12 @@ using System.Runtime.InteropServices;
 // General Information about an assembly is controlled through the following 
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
-[assembly: AssemblyTitle("Duplicati.GUI.TrayIcon")]
+[assembly: AssemblyTitle("Duplicati")]
 [assembly: AssemblyDescription("")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("Duplicati Team")]
 [assembly: AssemblyProduct("Duplicati.GUI.TrayIcon")]
-[assembly: AssemblyCopyright("LGPL, Copyright © Duplicati Team 2015")]
+[assembly: AssemblyCopyright("LGPL, Copyright © Duplicati Team 2019")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

@@ -11,6 +11,9 @@
 # Then load overrides
 %include %{_topdir}/SOURCES/%{namer}-buildinfo.spec
 
+# Make sure it does not break because we have som arch-dependant libraries bundled
+%define _binaries_in_noarch_packages_terminate_build 0
+
 Name:	%{namer}
 Version:	%{_buildversion}
 Release:	%{_buildtag}
@@ -29,9 +32,12 @@ URL:	http://www.duplicati.com
 Source0:	duplicati-%{_buildversion}.tar.bz2
 Source1:	%{namer}-make-binary-package.sh
 Source2: 	%{namer}-install-recursive.sh
+Source3: 	%{namer}.service
+Source4: 	%{namer}.default
 
 BuildRequires:  desktop-file-utils
 BuildRequires:  dos2unix
+BuildRequires:  systemd
 
 Requires:	desktop-file-utils
 Requires:	bash
@@ -87,14 +93,14 @@ rm -rf win-tools
 rm -rf SQLite/win64
 rm -rf SQLite/win32
 rm -rf MonoMac.dll
-rm -rf alphavss
 rm -rf OSX\ Icons
 rm -rf OSXTrayHost
-rm AlphaFS.dll
-rm AlphaVSS.Common.dll
-rm -rf licenses/alphavss
 rm -rf licenses/MonoMac
 rm -rf licenses/gpg
+rm -rf win-x64\storj_uplink.dll
+rm -rf win-x86\storj_uplink.dll
+rm -rf storj_uplink.dll
+rm -rf libstorj_uplink.dylib
 
 
 %install
@@ -131,17 +137,26 @@ find "%{buildroot}%{_exec_prefix}/lib/%{namer}"/* -type f -name \*.exe | xargs c
 find "%{buildroot}%{_exec_prefix}/lib/%{namer}"/* -type f -name \*.sh | xargs chmod 755
 #find "%{buildroot}%{_exec_prefix}/lib/%{namer}"/* -type f -name \*.py | xargs chmod 755
 
-desktop-file-install %{namer}.desktop 
+desktop-file-install %{namer}.desktop
+
+# Install the service:
+install -p -D -m 755 %{_topdir}/SOURCES/%{namer}.service %{_unitdir}
+install -p -D -m 644 %{_topdir}/SOURCES/%{namer}.default %{_sysconfdir}/sysconfig/
 
 %post
 /bin/touch --no-create %{_datadir}/icons/hicolor || :
 %{_bindir}/gtk-update-icon-cache \
   --quiet %{_datadir}/icons/hicolor 2> /dev/null|| :
+%systemd_post %{namer}.service
+
+%preun
+%systemd_preun %{namer}.service
 
 %postun
 /bin/touch --no-create %{_datadir}/icons/hicolor || :
 %{_bindir}/gtk-update-icon-cache \
   --quiet %{_datadir}/icons/hicolor 2> /dev/null|| :
+%systemd_postun_with_restart %{namer}.service
 
 %posttrans
 /usr/bin/gtk-update-icon-cache %{_datadir}/icons/hicolor &>/dev/null || :
@@ -155,6 +170,9 @@ desktop-file-install %{namer}.desktop
 
 
 %changelog
+* Wed Jun 21 2017 Kenneth Skovhede <kenneth@duplicati.com> - 2.0.0-0.20170621.git
+- Added the service file to the install
+
 * Thu Apr 28 2016 Kenneth Skovhede <kenneth@duplicati.com> - 2.0.0-0.20160423.git
 - Made a binary version of the spec file
 
