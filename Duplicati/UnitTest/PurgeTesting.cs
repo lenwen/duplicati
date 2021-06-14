@@ -20,6 +20,7 @@ using System.IO;
 using System.Linq;
 using Duplicati.Library.Common.IO;
 using Duplicati.Library.Interface;
+using Duplicati.Library.Main;
 using Duplicati.Library.Utility;
 using NUnit.Framework;
 
@@ -174,9 +175,9 @@ namespace Duplicati.UnitTest
                 Console.WriteLine("Listing final version information");
 
                 Console.WriteLine("Versions:");
-                Console.WriteLine("  " + string.Join(Environment.NewLine + "  ", filesets.Select(x => string.Format("{0}: {1}, {2} {3}", x.Version, x.Time, x.FileCount, x.FileSizes))));
+                Console.WriteLine("  " + string.Join(Environment.NewLine + "  ", filesets.Select(x => $"{x.Version}: {x.Time}, {x.FileCount} {x.FileSizes}")));
                 Console.WriteLine("Files:");
-                Console.WriteLine("  " + string.Join(Environment.NewLine + "  ", files.Select(x => string.Format("{0}: {1}", x.Path, string.Join(" - ", x.Sizes.Select(y => y.ToString()))))));
+                Console.WriteLine("  " + string.Join(Environment.NewLine + "  ", files.Select(x => $"{x.Path}: {string.Join(" - ", x.Sizes.Select(y => y.ToString()))}")));
 
                 Assert.AreEqual(4, filesets.Length, "Incorrect number of filesets after final backup");
                 Assert.AreEqual(filenames.Count + 1, filecount, "Incorrect number of files after final backup");
@@ -232,6 +233,7 @@ namespace Duplicati.UnitTest
             }
 
             File.Delete(dblock_file);
+            var last_ts = DateTime.Now;
 
             long[] affectedfiles;
 
@@ -260,6 +262,15 @@ namespace Duplicati.UnitTest
                     Assert.AreEqual(affectedfiles[i], files);
                 }
 
+            // A dry-run should run without exceptions (see issue #4379).
+            Dictionary<string, string> dryRunOptions = new Dictionary<string, string>(testopts) {["dry-run"] = "true"};
+            using (Controller c = new Controller("file://" + this.TARGETFOLDER, dryRunOptions, null))
+            {
+                IPurgeBrokenFilesResults purgeResults = c.PurgeBrokenFiles(null);
+                Assert.AreEqual(0, purgeResults.Errors.Count());
+                Assert.AreEqual(0, purgeResults.Warnings.Count());
+            }
+
             using (var c = new Library.Main.Controller("file://" + TARGETFOLDER, testopts, null))
             {
                 var brk = c.PurgeBrokenFiles(null);
@@ -274,7 +285,20 @@ namespace Duplicati.UnitTest
 
                 Assert.AreEqual(3, modFilesets);
             }
-        }
 
+
+            // Since we make the operations back-to-back, the purge timestamp can drift beyond the current time
+            var wait_target = last_ts.AddSeconds(10) - DateTime.Now;
+            if (wait_target.TotalMilliseconds > 0)
+                System.Threading.Thread.Sleep(wait_target);
+
+            // A subsequent backup should be successful.
+            using (Controller c = new Controller("file://" + this.TARGETFOLDER, testopts, null))
+            {
+                IBackupResults backupResults = c.Backup(new[] {this.DATAFOLDER});
+                Assert.AreEqual(0, backupResults.Errors.Count());
+                Assert.AreEqual(0, backupResults.Warnings.Count());
+            }
+        }
     }
 }
